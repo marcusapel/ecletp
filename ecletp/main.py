@@ -60,7 +60,7 @@ def cli():
     p = argparse.ArgumentParser(description='GRDECL -> RESQML -> ETP publisher (RESQML 2.0.1, ETP 1.2)')
     p.add_argument('--eclgrd', help='Path to Eclipse GRDECL .grdecl; if omitted, uses demo 2x2x3 grid', default=None)
     p.add_argument('--dataspace', help="ETP dataspace, e.g., maap/m25test", default='maap/m25test')
-    p.add_argument('--confid', help='Path to config_etp.py (connection, token)', required=True)
+    p.add_argument('--config', help='Path to config_etp.py (connection, token)', required=False)
     p.add_argument('--app-name', default='ecl2resqml_etp')
     p.add_argument('--title', help='Title prefix for objects', default=None)
     p.add_argument('--log', action='store_true', help='Enable debug logging')
