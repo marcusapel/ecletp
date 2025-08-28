@@ -1,126 +1,133 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Build a RESQML model from an Eclipse corner-point grid and properties using resqpy.
 
-from __future__ import annotations
-import io
-import logging
-import uuid as _uuid
-from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+Features:
+- Creates EPC/HDF5 model and CRS
+- Imports corner-point grid (7D array)
+- Adds ACTNUM and other properties with correct metadata
+- Supports categorical properties via StringLookup
+- Optional GRDECL import using xtgeo
+
+Author: Marcus Apel (Equinor) 
+"""
+
+import os
 import numpy as np
+import resqpy.model as rq
+import resqpy.crs as rqc
+import resqpy.rq_import as rqimp
+import resqpy.property as rqp
 
-from .grdecl_reader import GrdeclGrid
-from .osdu_mapping import OSDU_PROPERTY_MAP
-
-logger = logging.getLogger(__name__)
-
-_NAMESPACE_SEED = _uuid.UUID('00000000-0000-0000-0000-0000000002a1')  # arbitrary constant seed for uuid5
-
-@dataclass
-class InMemoryResqml:
-    model: 'resqpy.model.Model'
-    crs_uuid: _uuid.UUID
-    grid_uuid: _uuid.UUID
-    property_uuids: Dict[str, _uuid.UUID]
-    xml_by_uuid: Dict[_uuid.UUID, bytes]  # serialized xml bytes for each object
-    array_uris: Dict[str, Tuple[str, np.ndarray]]  # label -> (uuid-path-URI, np.ndarray)
+try:
+    import xtgeo
+    _HAS_XTGEO = True
+except ImportError:
+    _HAS_XTGEO = False
 
 
-def uuid5(name: str) -> _uuid.UUID:
-    return _uuid.uuid5(_NAMESPACE_SEED, name)
-
-
-def build_in_memory(grid: GrdeclGrid, title_prefix: str, dataspace: str = "maap/m25test") -> InMemoryResqml:
-    """Build CRS, IJK grid and properties using resqpy with an in-memory HDF5 backend.
-    Returns an InMemoryResqml bundle with xml and numpy arrays and URI suggestions for ETP PutDataArrays.
-    """
-    import h5py
-    import lxml.etree as ET
-    import resqpy.model as rq
-    import resqpy.crs as rqc
-    import resqpy.grid as rqq
-    import resqpy.property as rqp
-
-    # Create a new in-memory model
-    model = rq.new_model('inmem.epc')
-
-    # Define default CRS using EPSG:2334
+# ---------------- CRS ----------------
+def create_crs(model, xy_units="m", z_units="m", z_inc_down=True,
+               epsg_code=None, rotation=0.0, offsets=(0.0, 0.0, 0.0)):
     crs = rqc.Crs(
         parent_model=model,
-        title='EPSG:2334 CRS',
-        x_offset=0.0,
-        y_offset=0.0,
-        z_offset=0.0,
-        rotation=0.0,
-        xy_units='m',
-        z_units='m',
-        z_inc_down=True,
-        epsg_code='2334' 
+        xy_units=xy_units,
+        z_units=z_units,
+        z_inc_down=z_inc_down,
+        epsg_code=epsg_code,
+        rotation=rotation,
+        x_offset=offsets[0],
+        y_offset=offsets[1],
+        z_offset=offsets[2],
+        title="LocalDepth3dCrs"
     )
-    crs.create_xml()
+    crs.create_xml(add_as_part=True)
+    return crs
+
+
+# ---------------- Property Mapping ----------------
+ECL_TO_RESQML = {
+    "PORO": {"kind": "porosity", "uom": None},
+    "NTG": {"kind": "net to gross ratio", "uom": None},
+    "PERMX": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "I"},
+    "PERMY": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "J"},
+    "PERMZ": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "K"},
+    "ACTNUM": {"kind": "discrete", "uom": None}
+}
+
+
+def add_property(model, grid_uuid, array, keyword, string_lookup_uuid=None):
+    meta = ECL_TO_RESQML.get(keyword.upper(), {})
+    prop = rqp.Property.from_array(
+        parent_model=model,
+        cached_array=array,
+        support_uuid=grid_uuid,
+        property_kind=meta.get("kind", "continuous"),
+        indexable_element="cells",
+        uom=meta.get("uom"),
+        facet_type=meta.get("facet_type"),
+        facet=meta.get("facet"),
+        string_lookup_uuid=string_lookup_uuid,
+        citation_title=keyword.upper()
+    )
+    prop.write_hdf5()
+    prop.create_xml(add_as_part=True)
+    return prop
+
+
+# ---------------- Main Builder ----------------
+def build_from_corner_points(epc_path, cp_kjinxyz, actnum=None, properties=None,
+                              epsg_code=None, facies_lookup=None):
+    model = rq.Model(epc_file=epc_path, new_epc=True, create_basics=True, create_hdf5_ext=True)
+    crs = create_crs(model, epsg_code=epsg_code)
 
     # Grid
-    grid_uuid = uuid5(f"{title_prefix}:ijkgrid")
-    if grid.geometry_kind == 'cartesian' and grid.dx is not None and grid.dy is not None and grid.dz is not None:
-        reg = rqq.RegularGrid(
-            parent_model=model,
-            origin=(0.0, 0.0, 0.0 if grid.tops is None else float(grid.tops.min())),
-            extent_kji=(grid.nk, grid.nj, grid.ni),
-            dxyz=(float(grid.dx.mean()), float(grid.dy.mean()), float(grid.dz.mean())),
-            crs_uuid=crs.uuid,
-            set_points_cached=False,
-            title=f"{title_prefix} IJK Grid",
-            uuid=grid_uuid
-        )
-        reg.write_hdf5()
-        reg.create_xml(add_as_part=True)
-        resq_grid = reg
+    grid = rqimp.grid_from_cp(model, cp_kjinxyz, crs_uuid=crs.uuid, treat_as_nan=np.nan)
+    grid.write_hdf5()
+    grid.create_xml(add_as_part=True)
+
+    # ACTNUM
+    if actnum is not None:
+        add_property(model, grid.uuid, actnum.astype(np.int32), "ACTNUM")
+
+    # FACIES lookup
+    facies_lookup_uuid = None
+    if facies_lookup:
+        sl = rqp.StringLookup(model, int_to_str_dict=facies_lookup, title="FACIES_LOOKUP")
+        sl.create_xml(add_as_part=True)
+        facies_lookup_uuid = sl.uuid
+
+    # Other properties
+    if properties:
+        for kw, arr in properties.items():
+            add_property(model, grid.uuid, arr, kw, string_lookup_uuid=facies_lookup_uuid if kw.upper() == "FACIES" else None)
+
+    model.store_epc()
+    return model
+
+
+# ---------------- GRDECL Import ----------------
+def build_from_grdecl(grdecl_path, epc_path, epsg_code=None):
+    if not _HAS_XTGEO:
+        raise ImportError("xtgeo is required for GRDECL import.")
+    grid = xtgeo.grid_from_file(grdecl_path)
+    cp = grid.corner_points()
+    act = getattr(grid, "actnum", None)
+    props = {p.name.upper(): np.asarray(p.values).reshape(grid.nk, grid.nj, grid.ni) for p in grid.properties}
+    return build_from_corner_points(epc_path, cp, actnum=act, properties=props, epsg_code=epsg_code)
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Build RESQML EPC from Eclipse corner-point grid.")
+    ap.add_argument("epc", help="Output EPC file path")
+    ap.add_argument("--grdecl", help="Input GRDECL file (requires xtgeo)")
+    ap.add_argument("--epsg", help="EPSG code", default=None)
+    args = ap.parse_args()
+
+    if args.grdecl:
+        build_from_grdecl(args.grdecl, args.epc, epsg_code=args.epsg)
     else:
-        # Corner point grid using COORD & ZCORN
-        g = rqq.Grid.from_corner_points(
-            parent_model=model,
-            ni=grid.ni, nj=grid.nj, nk=grid.nk,
-            zcorn=grid.zcorn.reshape((-1,)),  # resqpy expects shaped arrays; from GRDECL layout
-            coord=grid.coord.reshape((-1,)),
-            crs_uuid=crs.uuid,
-            title=f"{title_prefix} IJK Grid",
-            uuid=grid_uuid
-        )
-        g.write_hdf5()
-        g.create_xml(add_as_part=True)
-        resq_grid = g
+        print("Provide --grdecl or call build_from_corner_points() in your code.")
 
-    # ACTNUM as discrete/categorical property
-    property_uuids: Dict[str, _uuid.UUID] = {}
-    array_uris: Dict[str, Tuple[str, np.ndarray]] = {}
-
-    for kw, arr in grid.properties.items():
-        kind = OSDU_PROPERTY_MAP.get(kw, {}).get('resqml_property_kind', 'unknown')
-        uom = OSDU_PROPERTY_MAP.get(kw, {}).get('uom', 'Euc')
-        title = OSDU_PROPERTY_MAP.get(kw, {}).get('display', kw)
-        puuid = uuid5(f"{title_prefix}:prop:{kw}")
-        discrete = True if kw.upper() == 'ACTNUM' or arr.dtype in (np.int32, np.int64, np.uint8) else False
-        p = rqp.Property(
-            parent_model=model,
-            support=resq_grid,
-            property_kind=kind,
-            indexable_element='cells',
-            uom=(uom if not discrete else None),
-            discrete=discrete,
-            title=title,
-            uuid=puuid
-        )
-        p.set_array_values(arr)
-        p.write_hdf5()
-        p.create_xml(add_as_part=True)
-        property_uuids[kw] = puuid
-        # Suggest a uuid-path DataArray URI under the property UUID
-        da_uri = f"eml:///dataspace('{dataspace}')/uuid({puuid})/path(values)"
-        array_uris[f"{kw}"] = (da_uri, arr)
-
-    # Serialize XML for objects (for PutDataObjects payloads)
-    xml_by_uuid: Dict[_uuid.UUID, bytes] = {}
-    for u in [crs_uuid, grid_uuid] + list(property_uuids.values()):
-        root = model.root(uuid=u)
-        xml_bytes = ET.tostring(root, pretty_print=True, xml_declaration=True, encoding='UTF-8')
-        xml_by_uuid[u] = xml_bytes
-
-    return InMemoryResqml(model=model, crs_uuid=crs.uuid, grid_uuid=grid_uuid, property_uuids=property_uuids, xml_by_uuid=xml_by_uuid, array_uris=array_uris)
