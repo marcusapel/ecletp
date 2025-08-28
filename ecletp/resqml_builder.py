@@ -1,351 +1,322 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Build a RESQML model from an Eclipse corner-point grid and properties using resqpy.
-
-- Creates EPC/HDF5 model & CRS
-- Imports corner-point grid (7D array: (nk, nj, ni, 2, 2, 2, 3))
-- Adds ACTNUM & other properties (facets & lookup supported)
-- Optional GRDECL import (xtgeo)
-- build_in_memory(source_grid, ...) accepts a parsed grid from grdecl_reader
-  or creates a tiny synthetic demo if source_grid is None.
-
-Author: Marcus Apel (Equinor) | Scaffolded by Copilot
-"""
-
+# resqml_builder.py
 from __future__ import annotations
 
-import os
-from typing import Dict, Optional, Tuple, Any
+import uuid as _uuid
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import resqpy.model as rq
-import resqpy.crs as rqc
-import resqpy.rq_import as rqimp
-import resqpy.property as rqp
+import xtgeo
 
-try:
-    import xtgeo  # optional, only needed for GRDECL import
-    _HAS_XTGEO = True
-except Exception:
-    _HAS_XTGEO = False
+# resqpy imports are optional in ETP mode (we import lazily)
+# import resqpy.model as rq
+# import resqpy.crs as rqc
+# import resqpy.grid as rqq
+# import resqpy.rq_import as rqi
+# import resqpy.property as rqp
 
+# ----------------------------
+# Helpers & configuration
+# ----------------------------
 
-__all__ = [
-    "create_crs",
-    "add_property",
-    "build_from_corner_points",
-    "build_from_grdecl",
-    "build_in_memory",
-]
+# Stable namespace for deterministic UUIDs (change if you want different stable IDs across envs)
+NAMESPACE = _uuid.UUID("9a2a3bbb-6b23-4f6e-9b1c-9e1b1eec1e06")
 
+def stable_uuid(*name_parts: str) -> _uuid.UUID:
+    """Deterministically derive a UUID5 from a set of name parts."""
+    name = "|".join(str(p) for p in name_parts)
+    return _uuid.uuid5(NAMESPACE, name)
 
-# ---------------- CRS ----------------
-def create_crs(model: rq.Model,
-               *,
-               xy_units: str = "m",
-               z_units: str = "m",
-               z_inc_down: bool = True,
-               epsg_code: Optional[str] = None,
-               rotation: float = 0.0,
-               offsets: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> rqc.Crs:
-    """Create & register a LocalDepth3d CRS."""
-    crs = rqc.Crs(
-        parent_model=model,
-        xy_units=xy_units,
-        z_units=z_units,
-        z_inc_down=z_inc_down,
-        epsg_code=epsg_code,
-        rotation=rotation,
-        x_offset=offsets[0],
-        y_offset=offsets[1],
-        z_offset=offsets[2],
-        title="LocalDepth3dCrs",
-    )
-    crs.create_xml(add_as_part=True)
-    return crs
+@dataclass
+class ArrayBinding:
+    uuid: _uuid.UUID
+    title: str
+    indexable: str
+    kind: str
+    planned_hdf5_path: str
+    shape: Tuple[int, ...]
+    dtype: str
+    uom: Optional[str] = None
+    facet_type: Optional[str] = None
+    facet: Optional[str] = None
 
+@dataclass
+class BuildBundle:
+    mode: str  # "etp" or "resqpy"
+    dataspace: str
+    model: Optional[object] = None  # resqpy Model in "resqpy" mode
+    grid_uuid: Optional[_uuid.UUID] = None
+    crs_uuid: Optional[_uuid.UUID] = None
+    property_index: Dict[str, _uuid.UUID] = field(default_factory=dict)
+    # Registry for ETP (uuid -> ndarray)
+    array_registry: Dict[_uuid.UUID, np.ndarray] = field(default_factory=dict)
+    # Metadata for arrays (uuid -> binding)
+    array_meta: Dict[_uuid.UUID, ArrayBinding] = field(default_factory=dict)
 
-# ---------------- Property Mapping ----------------
-ECL_TO_RESQML: Dict[str, Dict[str, Optional[str]]] = {
-    "PORO": {"kind": "porosity", "uom": None, "facet_type": None, "facet": None},
-    "NTG": {"kind": "net to gross ratio", "uom": None, "facet_type": None, "facet": None},
-    "PERMX": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "I"},
-    "PERMY": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "J"},
-    "PERMZ": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "K"},
-    "ACTNUM": {"kind": "discrete", "uom": None, "facet_type": None, "facet": None},
-    # Extend as needed (PVTNUM, SATNUM, saturations, multipliers, etc.)
+# Minimal mapping from Eclipse keywords to RESQML property kinds & units
+# Extend as needed
+ECL_TO_RESQML = {
+    "ACTNUM": ("discrete", None),
+    "PORO": ("porosity", None),
+    "PERMX": ("permeability rock", "m2"),  # RESQML kind name; uom in SI (m2); convert if needed
+    "PERMY": ("permeability rock", "m2"),
+    "PERMZ": ("permeability rock", "m2"),
+    "NTG": ("net to gross ratio", None),
+    "SATNUM": ("discrete", None),
+    "PVTNUM": ("discrete", None),
 }
 
+def infer_kind_uom(keyword: str, values: np.ndarray) -> Tuple[str, Optional[str]]:
+    kind, uom = ECL_TO_RESQML.get(keyword.upper(), (None, None))
+    if kind is None:
+        # fallback: continuous vs discrete by dtype
+        kind = "continuous" if values.dtype.kind in ("f", "c") else "discrete"
+    return kind, uom
 
-def add_property(model: rq.Model,
-                 grid_uuid,
-                 array: np.ndarray,
-                 keyword: str,
-                 *,
-                 string_lookup_uuid: Optional[str] = None,
-                 citation_title: Optional[str] = None) -> rqp.Property:
-    """
-    Add a (cell) property to the model referencing the grid.
-    Array must be shaped (nk, nj, ni) in RESQML order [k, j, i].
-    """
-    meta = ECL_TO_RESQML.get(keyword.upper(), {})
-    prop = rqp.Property.from_array(
-        parent_model=model,
-        cached_array=array,
-        support_uuid=grid_uuid,
-        property_kind=meta.get("kind", "continuous"),
-        indexable_element="cells",
-        uom=meta.get("uom"),
-        facet_type=meta.get("facet_type"),
-        facet=meta.get("facet"),
-        string_lookup_uuid=string_lookup_uuid,
-        citation_title=citation_title or keyword.upper(),
-    )
-    prop.write_hdf5()
-    prop.create_xml(add_as_part=True)
-    return prop
+# ----------------------------
+# Public API
+# ----------------------------
 
-
-# ---------------- Build from corner points ----------------
-def build_from_corner_points(
+def build_in_memory(
+    xtg_grid: xtgeo.Grid,
     *,
-    epc_path: str,
-    cp_kjinxyz: np.ndarray,                      # (nk, nj, ni, 2, 2, 2, 3)
-    actnum_kji: Optional[np.ndarray] = None,     # (nk, nj, ni)
-    properties: Optional[Dict[str, np.ndarray]] = None,  # keyword -> array (nk,nj,ni)
-    epsg_code: Optional[str] = None,
-    title: str = "Eclipse Grid",
-    xy_units: str = "m",
-    z_units: str = "m",
-    z_inc_down: bool = True,
-    rotation: float = 0.0,
-    offsets: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-    facies_lookup: Optional[Dict[int, str]] = None,
-) -> rq.Model:
+    title_prefix: str = "ECL2RESQML",
+    dataspace: str = "default",
+    epsg: Optional[int] = None,
+    mode: str = "etp",  # "etp" (no disk write) or "resqpy" (canonical EPC+HDF5)
+    properties: Optional[Dict[str, np.ndarray]] = None,  # extra properties by keyword
+) -> BuildBundle:
     """
-    Creates a new RESQML model with:
-      * LocalDepth3d CRS
-      * IJK grid from corner points
-      * ACTNUM & other properties
+    Entry point. Builds a grid + properties mapping ready for either ETP streaming ('etp' mode)
+    or a canonical RESQML dataset ('resqpy' mode).
     """
-    # 1) Model
-    model = rq.Model(epc_file=epc_path, new_epc=True, create_basics=True, create_hdf5_ext=True)
+    if mode not in ("etp", "resqpy"):
+        raise ValueError("mode must be 'etp' or 'resqpy'")
 
-    # 2) CRS
-    crs = create_crs(
-        model,
-        xy_units=xy_units,
-        z_units=z_units,
-        z_inc_down=z_inc_down,
-        epsg_code=epsg_code,
-        rotation=rotation,
-        offsets=offsets,
+    bundle = BuildBundle(mode=mode, dataspace=dataspace)
+    bundle = build_from_corner_points(
+        xtg_grid,
+        bundle=bundle,
+        title_prefix=title_prefix,
+        dataspace=dataspace,
+        epsg=epsg,
+        properties=properties or {},
     )
+    return bundle
 
-    # 3) Grid import (in-memory only here)
-    cp_shape = cp_kjinxyz.shape
-    assert len(cp_shape) == 7 and cp_shape[-1] == 3, f"Corner points must be (nk, nj, ni, 2, 2, 2, 3), got {cp_shape}"
 
-    _active_mask = actnum_kji.astype(bool) if actnum_kji is not None else None
+def build_from_corner_points(
+    xtg_grid: xtgeo.Grid,
+    *,
+    bundle: BuildBundle,
+    title_prefix: str,
+    dataspace: str,
+    epsg: Optional[int],
+    properties: Dict[str, np.ndarray],
+) -> BuildBundle:
+    """Build from an XTGeo corner-point grid."""
+    nk, nj, ni = xtg_grid.nk, xtg_grid.nj, xtg_grid.ni
+    # Corner points: (nk, nj, ni, 2, 2, 2, 3)
+    cp = xtg_grid.get_corner_points()
 
-    grid = rqimp.grid_from_cp(
-        model,
-        cp_kjinxyz,
-        crs_uuid=crs.uuid,
-        active_mask=_active_mask,  # optional; only if ACTNUM given
-        # Valid modes in this resqpy: 'none', 'dots', 'ij_dots', 'morse', 'inactive'
-        treat_as_nan=('inactive' if _active_mask is not None else 'none'),
-    )
+    # ACTNUM (bool) → int32 per cell
+    act = xtg_grid.get_actnum()
+    if act is None:
+        act = np.ones((nk, nj, ni), dtype=np.int32)
+    else:
+        act = act.astype(np.int32, copy=False)
 
-    # Persist geometry
-    grid.write_hdf5()
-    grid.create_xml(add_as_part=True)
+    # Deterministic grid & CRS UUIDs
+    grid_title = f"{title_prefix}_Grid_{nk}x{nj}x{ni}"
+    grid_uuid = stable_uuid(dataspace, "grid", grid_title)
+    crs_uuid = stable_uuid(dataspace, "crs", str(epsg or "unknown"))
+    bundle.grid_uuid = grid_uuid
+    bundle.crs_uuid = crs_uuid
 
-    nk, nj, ni = cp_shape[0], cp_shape[1], cp_shape[2]
+    # Prepare planned HDF5 dataset paths (used both by resqpy & ETP registry)
+    points_path = f"/RESQML/IjkGridRepresentation/{grid_uuid}/Points"
+    actnum_path = f"/RESQML/GridProperty/{grid_uuid}/ACTNUM"
 
-    # 4) ACTNUM (explicitly stored as discrete)
-    if actnum_kji is not None:
-        assert actnum_kji.shape == (nk, nj, ni), f"ACTNUM must be {(nk, nj, ni)}, got {actnum_kji.shape}"
-        add_property(model, grid.uuid, actnum_kji.astype(np.int32), "ACTNUM")
+    if bundle.mode == "etp":
+        # --- ETP mode: do NOT write EPC/HDF5. Keep arrays in memory & record metadata.
 
-    # 5) Categorical lookup (FACIES) – provide if you need categorical properties
-    facies_lookup_uuid = None
-    if facies_lookup:
-        sl = rqp.StringLookup(model, int_to_str_dict=facies_lookup, title="FACIES_LOOKUP")
-        sl.create_xml(add_as_part=True)
-        facies_lookup_uuid = sl.uuid
+        # Flatten points to (n_cells, 8, 3) if needed by your downstream
+        cp_reg = cp  # keep original shape; ETP client can reshape
+        _register_array(
+            bundle,
+            uuid=stable_uuid(dataspace, "grid", "points", str(grid_uuid)),
+            title=f"{grid_title}_Points",
+            indexable="cells",
+            kind="points",
+            array=cp_reg,
+            planned_path=points_path,
+            uom=None,
+        )
 
-    # 6) Other properties
-    if properties:
+        _register_array(
+            bundle,
+            uuid=stable_uuid(dataspace, "grid", "ACTNUM", str(grid_uuid)),
+            title="ACTNUM",
+            indexable="cells",
+            kind="discrete",
+            array=act,
+            planned_path=actnum_path,
+            uom=None,
+        )
+
+        # Extra cell properties
         for kw, arr in properties.items():
-            assert arr.shape == (nk, nj, ni), f"{kw} must be {(nk, nj, ni)}, got {arr.shape}"
-            add_property(
-                model,
-                grid.uuid,
-                arr,
-                kw,
-                string_lookup_uuid=(facies_lookup_uuid if kw.upper() == "FACIES" else None),
+            kind, uom = infer_kind_uom(kw, arr)
+            path = f"/RESQML/GridProperty/{grid_uuid}/{kw.upper()}"
+            _register_array(
+                bundle,
+                uuid=stable_uuid(dataspace, "grid", kw.upper(), str(grid_uuid)),
+                title=kw.upper(),
+                indexable="cells",
+                kind=kind,
+                array=np.asarray(arr),
+                planned_path=path,
+                uom=uom,
             )
 
-    # 7) Finalize EPC
-    model.store_epc()
-    return model
+        return bundle
+    # --- resqpy mode: build a canonical RESQML dataset (writes HDF5)
+    import resqpy.model as rq
+    import resqpy.crs as rqc
+    import resqpy.rq_import as rqi
+    import resqpy.property as rqp
 
+    model = rq.Model(new_epc=True, epc_file=f"{title_prefix}.epc")
+    bundle.model = model
 
-# ---------------- GRDECL import using xtgeo ----------------
-def build_from_grdecl(grdecl_path: str, epc_path: str, *, epsg_code: Optional[str] = None) -> rq.Model:
-    """
-    Read GRDECL via xtgeo, compute corner points, gather ACTNUM & properties,
-    then build the RESQML model.
-    """
-    if not _HAS_XTGEO:
-        raise ImportError("xtgeo is required for build_from_grdecl(). Install xtgeo or call build_from_corner_points().")
+    # CRS
+    crs = rqc.Crs(
+        model,
+        title=f"{title_prefix}_CRS",
+        epsg_code=epsg,
+        xy_units="m",
+        z_units="m",
+        z_inc_down=True,
+    )
+    crs.create_xml()  # writes CRS xml
 
-    grid = xtgeo.grid_from_file(grdecl_path)
-    cp = grid.corner_points()  # (nk, nj, ni, 2, 2, 2, 3)
-    nk, nj, ni, *_ = cp.shape
+    # Build grid from corner points
+    # resqpy.rq_import.grid_from_cp handles CP geometry
+    grid = rqi.grid_from_cp(
+        cp_array=cp,
+        model=model,
+        crs_uuid=crs.uuid,
+        title=grid_title,
+        max_z_void=0.1,  # typical default (introduces K-gaps if large voids)
+    )
+    # ACTNUM: set inactive mask on grid
+    grid.set_inactive(act == 0)
+    grid.create_xml()  # writes grid xml + geometry arrays to HDF5
 
-    act = getattr(grid, "actnum", None)
-    if act is not None:
-        act = np.asarray(act).reshape(nk, nj, ni)
+    bundle.grid_uuid = grid.uuid
+    bundle.crs_uuid = crs.uuid
 
-    props: Dict[str, np.ndarray] = {}
-    if hasattr(grid, "properties"):
-        for p in grid.properties:
-            name = p.name.upper()
-            if name in ECL_TO_RESQML or name == "FACIES":
-                arr = np.asarray(p.values).reshape(nk, nj, ni)
-                props[name] = arr
-
-    return build_from_corner_points(
-        epc_path=epc_path,
-        cp_kjinxyz=cp,
-        actnum_kji=act,
-        properties=props if props else None,
-        epsg_code=epsg_code,
-        title=os.path.splitext(os.path.basename(grdecl_path))[0],
+    # Add ACTNUM as property
+    add_property(
+        model,
+        support_uuid=grid.uuid,
+        values=act.astype(np.int32, copy=False),
+        title="ACTNUM",
+        property_kind="discrete",
+        indexable_element="cells",
     )
 
-
-# ---------------- In-memory builder (used by ecletp.main) ----------------
-def _make_synthetic_cp(nk=2, nj=2, ni=2, dx=100.0, dy=100.0, dz=10.0) -> np.ndarray:
-    """Produce a simple orthogonal 7D corner-points array."""
-    x = np.linspace(0.0, dx * ni, ni + 1)
-    y = np.linspace(0.0, dy * nj, nj + 1)
-    z0 = 0.0
-
-    cp = np.zeros((nk, nj, ni, 2, 2, 2, 3), dtype=float)
-    for k in range(nk):
-        for j in range(nj):
-            for i in range(ni):
-                zt, zb = z0 + k * dz, z0 + (k + 1) * dz
-                i0, i1 = i, i + 1
-                j0, j1 = j, j + 1
-                cp[k, j, i, 0, 0, 0] = (x[i0], y[j0], zt)
-                cp[k, j, i, 0, 0, 1] = (x[i1], y[j0], zt)
-                cp[k, j, i, 0, 1, 0] = (x[i0], y[j1], zt)
-                cp[k, j, i, 0, 1, 1] = (x[i1], y[j1], zt)
-                cp[k, j, i, 1, 0, 0] = (x[i0], y[j0], zb)
-                cp[k, j, i, 1, 0, 1] = (x[i1], y[j0], zb)
-                cp[k, j, i, 1, 1, 0] = (x[i0], y[j1], zb)
-                cp[k, j, i, 1, 1, 1] = (x[i1], y[j1], zb)
-    return cp
-
-
-def build_in_memory(source_grid: Optional[Any] = None,
-                    *,
-                    epc_path: str = "in_memory.epc",
-                    title_prefix: str = "In-Memory",
-                    dataspace: Optional[str] = None) -> rq.Model:
-    """
-    Build a RESQML model entirely in memory.
-
-    Parameters
-    ----------
-    source_grid : optional
-        Parsed grid from ecletp.grdecl_reader (dict-like). Expected keys if provided:
-          - 'cp' or 'corner_points': (nk,nj,ni,2,2,2,3) float64
-          - 'actnum' (optional): (nk,nj,ni) int/bool
-          - 'properties' (optional): dict[str, (nk,nj,ni)]
-          - 'epsg', 'xy_units', 'z_units', 'z_inc_down' (optional metadata)
-    epc_path : str
-        Output EPC path.
-    title_prefix : str
-        Title prefix used for the grid/metadata (not a kwarg to grid_from_cp).
-    dataspace : str | None
-        Passed through (not used here, but accepted for CLI compatibility).
-
-    Returns
-    -------
-    resqpy.model.Model
-    """
-
-    # If a grid object was provided (from your reader), use it; else make a tiny demo.
-    if source_grid is not None:
-        # Accept dict-like inputs
-        get = (source_grid.get if isinstance(source_grid, dict) else lambda k, d=None: getattr(source_grid, k, d))
-
-        cp = get("cp", None) or get("corner_points", None)
-        if cp is None:
-            # Fallback to demo if cp missing
-            cp = _make_synthetic_cp(nk=3, nj=2, ni=2, dx=100.0, dy=100.0, dz=10.0)
-
-        act = get("actnum", None)
-        props = get("properties", None) or {}
-
-        epsg = get("epsg", None)
-        xy_units = get("xy_units", "m")
-        z_units = get("z_units", "m")
-        z_inc_down = bool(get("z_inc_down", True))
-
-        model = build_from_corner_points(
-            epc_path=epc_path,
-            cp_kjinxyz=np.asarray(cp),
-            actnum_kji=(np.asarray(act) if act is not None else None),
-            properties={k.upper(): np.asarray(v) for k, v in props.items()},
-            epsg_code=epsg,
-            title=f"{title_prefix} Grid",
-            xy_units=xy_units,
-            z_units=z_units,
-            z_inc_down=z_inc_down,
+    # Add extra cell properties
+    for kw, arr in properties.items():
+        knd, uom = infer_kind_uom(kw, arr)
+        add_property(
+            model,
+            support_uuid=grid.uuid,
+            values=np.asarray(arr),
+            title=kw.upper(),
+            property_kind=knd,
+            indexable_element="cells",
+            uom=uom,
         )
-        return model
 
-    # No source grid: produce a small synthetic example (2x2x2)
-    nk, nj, ni = 2, 2, 2
-    cp = _make_synthetic_cp(nk=nk, nj=nj, ni=ni, dx=100.0, dy=100.0, dz=10.0)
-    poro = np.full((nk, nj, ni), 0.25, dtype=float)
-    ntg = np.ones((nk, nj, ni), dtype=float)
-    permz = np.full((nk, nj, ni), 100.0, dtype=float)  # mD
-    actnum = np.ones((nk, nj, ni), dtype=np.int32)
+    # Persist to EPC/HDF5 on disk
+    model.store_epc()
+    return bundle
 
-    model = build_from_corner_points(
-        epc_path=epc_path,
-        cp_kjinxyz=cp,
-        actnum_kji=actnum,
-        properties={"PORO": poro, "NTG": ntg, "PERMZ": permz},
-        epsg_code=None,
-        title=f"{title_prefix} Demo Grid",
+
+def add_property(
+    model,
+    support_uuid,
+    values: np.ndarray,
+    title: str,
+    *,
+    property_kind: Optional[str] = None,
+    indexable_element: str = "cells",
+    facet_type: Optional[str] = None,
+    facet: Optional[str] = None,
+    uom: Optional[str] = None,
+    time_series_uuid: Optional[_uuid.UUID] = None,
+    time_index: Optional[int] = None,
+    null_value: Optional[int] = None,
+    realization: Optional[int] = None,
+    local_property_kind_uuid: Optional[_uuid.UUID] = None,
+    string_lookup_uuid: Optional[_uuid.UUID] = None,
+):
+    """Create a RESQML Property (resqpy mode). In ETP mode we don't call this."""
+    import resqpy.property as rqp
+
+    if property_kind is None:
+        property_kind = "continuous" if values.dtype.kind in ("f", "c") else "discrete"
+
+    return rqp.Property.from_array(
+        parent_model=model,
+        support_uuid=support_uuid,
+        values=values,
+        title=title,  # <— 'title' is the citation title in resqpy API
+        property_kind=property_kind,
+        indexable_element=indexable_element,
+        facet_type=facet_type,
+        facet=facet,
+        uom=uom,
+        time_series_uuid=time_series_uuid,
+        time_index=time_index,
+        null_value=null_value,
+        realization=realization,
+        local_property_kind_uuid=local_property_kind_uuid,
+        string_lookup_uuid=string_lookup_uuid,
     )
-    return model
 
+# ----------------------------
+# Internal helpers
+# ----------------------------
 
-if __name__ == "__main__":
-    import argparse
-
-    ap = argparse.ArgumentParser(description="Build RESQML EPC from Eclipse corner-point grid.")
-    ap.add_argument("epc", nargs="?", help="Output EPC file path")
-    ap.add_argument("--grdecl", help="Input GRDECL file (requires xtgeo)")
-    ap.add_argument("--epsg", help="EPSG code, e.g. 'EPSG:32632'", default=None)
-    args = ap.parse_args()
-
-    if args.grdecl:
-        if not args.epc:
-            args.epc = os.path.splitext(os.path.basename(args.grdecl))[0] + ".epc"
-        build_from_grdecl(args.grdecl, args.epc, epsg_code=args.epsg)
-    elif args.epc:
-        # run synthetic in-memory build to the given EPC
-        build_in_memory(epc_path=args.epc)
-    else:
-        print("Provide --grdecl or an EPC path; or import build_in_memory()/build_from_corner_points() from your code.")
+def _register_array(
+    bundle: BuildBundle,
+    *,
+    uuid: _uuid.UUID,
+    title: str,
+    indexable: str,
+    kind: str,
+    array: np.ndarray,
+    planned_path: str,
+    uom: Optional[str],
+    facet_type: Optional[str] = None,
+    facet: Optional[str] = None,
+):
+    """Register an array for ETP streaming without writing HDF5."""
+    binding = ArrayBinding(
+        uuid=uuid,
+        title=title,
+        indexable=indexable,
+        kind=kind,
+        planned_hdf5_path=planned_path,
+        shape=tuple(array.shape),
+        dtype=str(array.dtype),
+        uom=uom,
+        facet_type=facet_type,
+        facet=facet,
+    )
+    bundle.array_registry[uuid] = array
+    bundle.array_meta[uuid] = binding
+    if title not in bundle.property_index:
+        bundle.property_index[title] = uuid
