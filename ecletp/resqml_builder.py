@@ -45,17 +45,23 @@ def build_in_memory(grid: GrdeclGrid, title_prefix: str, dataspace: str = "maap/
     model = rq.Model(new_epc=True, epc_file='inmem.epc')
     model.h5_file = mem_h5  # type: ignore
 
-    # CRS: LocalDepth3dCrs
-    crs_uuid = uuid5(f"{title_prefix}:crs")
+import resqpy.crs as rqc
+
+def build_in_memory(grid, title_prefix='model', dataspace=''):
+    # Create a new in-memory model
+    model = rq.Model(new_epc_file='inmem.epc')
+
+    # Define default CRS using EPSG:2334
     crs = rqc.Crs(
-        model,
-        title=f"{title_prefix} CRS",
-        xy_units='m',
-        z_units='m',
+        model=model,
+        title='EPSG:2334 CRS',
+        origin=(0.0, 0.0, 0.0),
+        rotation=0.0,
         z_inc_down=True,
-        uuid=crs_uuid
+        units='m',
+        epsg_code=2334
     )
-    crs.create_xml(add_as_part=True)
+    crs.create_xml()
 
     # Grid
     grid_uuid = uuid5(f"{title_prefix}:ijkgrid")
