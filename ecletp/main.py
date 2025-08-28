@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import logging
 from pathlib import Path
 
 from .grdecl_reader import read_grdecl
 from .resqml_builder import build_in_memory
+from . import config_etp as conf  # use in-repo configuration module
 from .etp_client import (
     EtpConfig,
     connect_etp,
@@ -21,15 +21,6 @@ from .etp_client import (
 )
 
 LOG = logging.getLogger("ecl2resqml_etp")
-
-
-def load_confid(conf_path: str):
-    """Dynamically load the ETP connection configuration module."""
-    spec = importlib.util.spec_from_file_location("config_etp", conf_path)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
-    return mod
 
 
 def build_and_publish(args) -> None:
@@ -53,7 +44,6 @@ def build_and_publish(args) -> None:
 
     # Build in-memory RESQML + arrays using the canonical kwargs
     bundle = build_in_memory(
-        xtg_grid=grid,
         title_prefix=title_prefix,
         dataspace=args.dataspace,
         epsg=args.epsg,
@@ -69,19 +59,16 @@ def build_and_publish(args) -> None:
 
     objects = []
 
-    # CRS first
+    # CRS
     objects.append((uri_for(bundle.crs_uuid), bundle.xml_by_uuid[bundle.crs_uuid], CONTENT_TYPE_EML_CRS))
-
-    # Grid next
+    # Grid
     objects.append((uri_for(bundle.grid_uuid), bundle.xml_by_uuid[bundle.grid_uuid], CONTENT_TYPE_RESQML_GRID))
-
     # Properties (discrete/continuous)
     for kw, puuid in bundle.property_uuids.items():
         ctype = CONTENT_TYPE_RESQML_DISCRETE if kw.upper() == "ACTNUM" else CONTENT_TYPE_RESQML_PROPERTY
         objects.append((uri_for(puuid), bundle.xml_by_uuid[puuid], ctype))
 
-    # Connect to ETP and publish
-    conf = load_confid(args.confid)
+    # Connect to ETP and publish (using in-repo config_etp.py)
     cfg = EtpConfig(
         ws_uri=conf.WS_URI,
         dataspace=args.dataspace,
@@ -103,7 +90,6 @@ def cli():
     p = argparse.ArgumentParser(description="GRDECL -> RESQML -> ETP publisher (RESQML 2.0.1, ETP 1.2)")
     p.add_argument("--eclgrd", help="Path to Eclipse GRDECL .grdecl; if omitted, uses demo 2x2x3 grid", default=None)
     p.add_argument("--dataspace", help="ETP dataspace, e.g., maap/m25test", default="maap/m25test")
-    p.add_argument("--config", help="Path to config_etp.py (connection, token)", default="config_etp.py")
     p.add_argument("--app-name", default="ecl2resqml_etp")
     p.add_argument("--title", help="Title prefix for objects", default=None)
     p.add_argument("--epsg", type=int, default=None, help="Optional EPSG code for CRS (e.g., 32631)")

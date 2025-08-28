@@ -1,0 +1,361 @@
+{
+  "rqc.Crs.__init__": [
+    {
+      "name": "parent_model",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "x_offset",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 0.0
+    },
+    {
+      "name": "y_offset",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 0.0
+    },
+    {
+      "name": "z_offset",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 0.0
+    },
+    {
+      "name": "rotation",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 0.0
+    },
+    {
+      "name": "rotation_units",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": "dega"
+    },
+    {
+      "name": "xy_units",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": "m"
+    },
+    {
+      "name": "z_units",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": "m"
+    },
+    {
+      "name": "z_inc_down",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": true
+    },
+    {
+      "name": "axis_order",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": "easting northing"
+    },
+    {
+      "name": "time_units",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "epsg_code",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "title",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "originator",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "extra_metadata",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    }
+  ],
+  "rqq.RegularGrid.__init__": [
+    {
+      "name": "parent_model",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "extent_kji",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "dxyz",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "dxyz_dkji",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "origin",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "crs_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "use_vertical",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "mesh",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "mesh_dz_dk",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 1.0
+    },
+    {
+      "name": "set_points_cached",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "as_irregular_grid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "find_properties",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": true
+    },
+    {
+      "name": "title",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "originator",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "extra_metadata",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": {}
+    },
+    {
+      "name": "load_inactive",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": true
+    }
+  ],
+  "rqq.Grid.corner_points": [
+    {
+      "name": "cell_kji0",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "points_root",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "cache_resqml_array",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": true
+    },
+    {
+      "name": "cache_cp_array",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    }
+  ],
+  "rqp.Property.__init__": [
+    {
+      "name": "parent_model",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "title",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "support_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "extra_metadata",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    }
+  ],
+  "rqp.Property.from_array": [
+    {
+      "name": "parent_model",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "cached_array",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "source_info",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "keyword",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "support_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "property_kind",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "local_property_kind_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "indexable_element",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "facet_type",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "facet",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "discrete",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "uom",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "null_value",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "time_series_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "time_index",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "realization",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "count",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": 1
+    },
+    {
+      "name": "points",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "const_value",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "string_lookup_uuid",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "find_local_property_kind",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": true
+    },
+    {
+      "name": "expand_const_arrays",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "dtype",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "use_pack",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": false
+    },
+    {
+      "name": "extra_metadata",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": {}
+    },
+    {
+      "name": "chunks",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    },
+    {
+      "name": "compression",
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "default": null
+    }
+  ]
+}

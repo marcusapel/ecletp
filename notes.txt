@@ -203,3 +203,125 @@ ADME Legal tags (how tags are created/validated and that the service auto-append
 (Background) OSDU discussions show that in newer releases, dataspace access and lifecycle operations depend on ACL + legal tag metadata associated with the dataspace record. 3
 One last thing, Marcus
 I noticed from past work you prefer local EnergyML bindings (e.g., commonv2.py / resqmlv2.py) over mixed/Geosiris imports. If you want, I can refactor the RESQML/EML payload construction to use your local bindings path and keep the ETP wrapping unchanged. Want me to do that next?
+
+@marcusapel ➜ /workspaces/ecletp (main) $ python - << 'PY'
+import sys, importlib
+import pkgutil, subprocess
+
+# Report Python + resqpy version info
+print("Python:", sys.version)
+try:
+    import resqpy
+    print("resqpy:", getattr(resqpy, "__version__", "unknown"))
+except Exception as ex:
+    print("resqpy import failed:", ex)
+
+# Also capture installed package version strings for the record
+subprocess.run([sys.executable, "-m", "pip", "show", "resqpy"])
+PY
+Python: 3.12.1 (main, Jul 10 2025, 11:57:50) [GCC 13.3.0]
+resqpy: 5.1.11
+Name: resqpy
+Version: 5.1.11
+Summary: Python API for working with RESQML models
+Home-page: 
+Author: BP
+Author-email: 
+License: MIT
+Location: /usr/local/python/3.12.1/lib/python3.12/site-packages
+Requires: h5py, joblib, lasio, lxml, numba, numpy, pandas, scipy
+Required-by: pyetp
+
+remember corner_points not from_corner_points: https://resqpy.readthedocs.io/en/latest/_autosummary/resqpy.grid.Grid.html
+
+@marcusapel ➜ /workspaces/ecletp (main) $ python -m ecletp.inspect
+
+--- VERIFIED SIGNATURES ---
+
+rqc.Crs.__init__
+  parent_model: POSITIONAL_OR_KEYWORD, default=None
+  uuid: POSITIONAL_OR_KEYWORD, default=None
+  x_offset: POSITIONAL_OR_KEYWORD, default=0.0
+  y_offset: POSITIONAL_OR_KEYWORD, default=0.0
+  z_offset: POSITIONAL_OR_KEYWORD, default=0.0
+  rotation: POSITIONAL_OR_KEYWORD, default=0.0
+  rotation_units: POSITIONAL_OR_KEYWORD, default='dega'
+  xy_units: POSITIONAL_OR_KEYWORD, default='m'
+  z_units: POSITIONAL_OR_KEYWORD, default='m'
+  z_inc_down: POSITIONAL_OR_KEYWORD, default=True
+  axis_order: POSITIONAL_OR_KEYWORD, default='easting northing'
+  time_units: POSITIONAL_OR_KEYWORD, default=None
+  epsg_code: POSITIONAL_OR_KEYWORD, default=None
+  title: POSITIONAL_OR_KEYWORD, default=None
+  originator: POSITIONAL_OR_KEYWORD, default=None
+  extra_metadata: POSITIONAL_OR_KEYWORD, default=None
+
+rqq.RegularGrid.__init__
+  parent_model: POSITIONAL_OR_KEYWORD, default=None
+  uuid: POSITIONAL_OR_KEYWORD, default=None
+  extent_kji: POSITIONAL_OR_KEYWORD, default=None
+  dxyz: POSITIONAL_OR_KEYWORD, default=None
+  dxyz_dkji: POSITIONAL_OR_KEYWORD, default=None
+  origin: POSITIONAL_OR_KEYWORD, default=(0.0, 0.0, 0.0)
+  crs_uuid: POSITIONAL_OR_KEYWORD, default=None
+  use_vertical: POSITIONAL_OR_KEYWORD, default=False
+  mesh: POSITIONAL_OR_KEYWORD, default=None
+  mesh_dz_dk: POSITIONAL_OR_KEYWORD, default=1.0
+  set_points_cached: POSITIONAL_OR_KEYWORD, default=False
+  as_irregular_grid: POSITIONAL_OR_KEYWORD, default=False
+  find_properties: POSITIONAL_OR_KEYWORD, default=True
+  title: POSITIONAL_OR_KEYWORD, default=None
+  originator: POSITIONAL_OR_KEYWORD, default=None
+  extra_metadata: POSITIONAL_OR_KEYWORD, default={}
+  load_inactive: POSITIONAL_OR_KEYWORD, default=True
+
+rqq.Grid.corner_points
+  cell_kji0: POSITIONAL_OR_KEYWORD, default=None
+  points_root: POSITIONAL_OR_KEYWORD, default=None
+  cache_resqml_array: POSITIONAL_OR_KEYWORD, default=True
+  cache_cp_array: POSITIONAL_OR_KEYWORD, default=False
+
+rqp.Property.__init__
+  parent_model: POSITIONAL_OR_KEYWORD, default=None
+  uuid: POSITIONAL_OR_KEYWORD, default=None
+  title: POSITIONAL_OR_KEYWORD, default=None
+  support_uuid: POSITIONAL_OR_KEYWORD, default=None
+  extra_metadata: POSITIONAL_OR_KEYWORD, default=None
+
+rqp.Property.from_array
+  parent_model: POSITIONAL_OR_KEYWORD, default=None
+  cached_array: POSITIONAL_OR_KEYWORD, default=None
+  source_info: POSITIONAL_OR_KEYWORD, default=None
+  keyword: POSITIONAL_OR_KEYWORD, default=None
+  support_uuid: POSITIONAL_OR_KEYWORD, default=None
+  property_kind: POSITIONAL_OR_KEYWORD, default=None
+  local_property_kind_uuid: POSITIONAL_OR_KEYWORD, default=None
+  indexable_element: POSITIONAL_OR_KEYWORD, default=None
+  facet_type: POSITIONAL_OR_KEYWORD, default=None
+  facet: POSITIONAL_OR_KEYWORD, default=None
+  discrete: POSITIONAL_OR_KEYWORD, default=False
+  uom: POSITIONAL_OR_KEYWORD, default=None
+  null_value: POSITIONAL_OR_KEYWORD, default=None
+  time_series_uuid: POSITIONAL_OR_KEYWORD, default=None
+  time_index: POSITIONAL_OR_KEYWORD, default=None
+  realization: POSITIONAL_OR_KEYWORD, default=None
+  count: POSITIONAL_OR_KEYWORD, default=1
+  points: POSITIONAL_OR_KEYWORD, default=False
+  const_value: POSITIONAL_OR_KEYWORD, default=None
+  string_lookup_uuid: POSITIONAL_OR_KEYWORD, default=None
+  find_local_property_kind: POSITIONAL_OR_KEYWORD, default=True
+  expand_const_arrays: POSITIONAL_OR_KEYWORD, default=False
+  dtype: POSITIONAL_OR_KEYWORD, default=None
+  use_pack: POSITIONAL_OR_KEYWORD, default=False
+  extra_metadata: POSITIONAL_OR_KEYWORD, default={}
+  chunks: POSITIONAL_OR_KEYWORD, default=None
+  compression: POSITIONAL_OR_KEYWORD, default=None
+
+Wrote verified_kwargs_manifest.json
+
+Next steps (pick your path)
+Keep cartesian demo working: you’re good to go. python -m ecletp.main --log will generate CRS + RegularGrid + properties (demo grid).
+Enable corner‑point: confirm which adapter you want:
+A. Nexus cp_array available → I’ll hook rq_import.grid_from_cp(...) directly. (Documented path.) 3
+B. GRDECL COORD/ZCORN → I’ll implement a verified converter to the expected cp_array shape/order (with tests), then call grid_from_cp(...). No guessing—share your expected shape/order and we’ll mirror it exactly.
+Would you like me to proceed with A or B? If B, drop me a small sample (COORD, ZCORN, DIMENS) and the target cp_array spec, and I’ll push a PR with the converter plus the updated builder.
