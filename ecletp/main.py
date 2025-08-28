@@ -44,11 +44,10 @@ def build_and_publish(args) -> None:
 
     # Build in-memory RESQML + arrays using the canonical kwargs
     bundle = build_in_memory(
+        grid,
         title_prefix=title_prefix,
         dataspace=args.dataspace,
-        epsg=args.epsg,
-        mode="etp",
-        properties=None,  # pass external properties dict here if needed
+        epsg=args.epsg
     )
 
     # Prepare PutDataObjects payloads
@@ -92,7 +91,7 @@ def cli():
     p.add_argument("--dataspace", help="ETP dataspace, e.g., maap/m25test", default="maap/m25test")
     p.add_argument("--app-name", default="ecl2resqml_etp")
     p.add_argument("--title", help="Title prefix for objects", default=None)
-    p.add_argument("--epsg", type=int, default=None, help="Optional EPSG code for CRS (e.g., 32631)")
+    p.add_argument("--epsg", type=int, default="2334", help="EPSG code for CRS (default 2334)")
     p.add_argument("--log", action="store_true", help="Enable debug logging")
     args = p.parse_args()
     build_and_publish(args)

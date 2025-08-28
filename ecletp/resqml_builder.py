@@ -35,6 +35,7 @@ def build_in_memory(
     grid: GrdeclGrid,
     title_prefix: str,
     dataspace: str = "maap/m25test",
+    epsg: str = "2334",
 ) -> InMemoryResqml:
     """
     Build CRS, IJK grid and properties using resqpy with an in-memory HDF5 backend.
@@ -67,6 +68,7 @@ def build_in_memory(
         z_units="m",
         z_inc_down=True,
         uuid=crs_uuid,
+        epsg_code=str(epsg)
     )
     crs.create_xml(add_as_part=True)
 

@@ -19,6 +19,7 @@ class Config:
     array_path_style: str = 'uuid-path'
     use_protocol9: bool = True
     object_format: str = 'XML'
+    epsg: int = 2334  # Default EPSG code
 
     @classmethod
     def from_env(cls) -> 'Config':
