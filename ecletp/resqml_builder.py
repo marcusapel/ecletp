@@ -7,14 +7,16 @@ Build a RESQML model from an Eclipse corner-point grid and properties using resq
 - Imports corner-point grid (7D array: (nk, nj, ni, 2, 2, 2, 3))
 - Adds ACTNUM & other properties (facets & lookup supported)
 - Optional GRDECL import (xtgeo)
-- Adds build_in_memory() for synthetic in-memory model
+- build_in_memory(source_grid, ...) accepts a parsed grid from grdecl_reader
+  or creates a tiny synthetic demo if source_grid is None.
 
 Author: Marcus Apel (Equinor) | Scaffolded by Copilot
 """
 
 from __future__ import annotations
+
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 
 import numpy as np
 import resqpy.model as rq
@@ -23,7 +25,7 @@ import resqpy.rq_import as rqimp
 import resqpy.property as rqp
 
 try:
-    import xtgeo
+    import xtgeo  # optional, only needed for GRDECL import
     _HAS_XTGEO = True
 except Exception:
     _HAS_XTGEO = False
@@ -72,7 +74,7 @@ ECL_TO_RESQML: Dict[str, Dict[str, Optional[str]]] = {
     "PERMY": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "J"},
     "PERMZ": {"kind": "rock permeability", "uom": "mD", "facet_type": "direction", "facet": "K"},
     "ACTNUM": {"kind": "discrete", "uom": None, "facet_type": None, "facet": None},
-    # Add more mappings as needed
+    # Extend as needed (PVTNUM, SATNUM, saturations, multipliers, etc.)
 }
 
 
@@ -141,28 +143,33 @@ def build_from_corner_points(
         offsets=offsets,
     )
 
-    # 3) Grid (rq_import.grid_from_cp does NOT persist; we'll write next)
+    # 3) Grid import (in-memory only here)
     cp_shape = cp_kjinxyz.shape
     assert len(cp_shape) == 7 and cp_shape[-1] == 3, f"Corner points must be (nk, nj, ni, 2, 2, 2, 3), got {cp_shape}"
+
+    _active_mask = actnum_kji.astype(bool) if actnum_kji is not None else None
+
     grid = rqimp.grid_from_cp(
         model,
         cp_kjinxyz,
         crs_uuid=crs.uuid,
-        set_parent_window=False,
-        title=title,
-        treat_as_nan=np.nan,  # modern flag per docs
+        active_mask=_active_mask,  # optional; only if ACTNUM given
+        # Valid modes in this resqpy: 'none', 'dots', 'ij_dots', 'morse', 'inactive'
+        treat_as_nan=('inactive' if _active_mask is not None else 'none'),
     )
+
+    # Persist geometry
     grid.write_hdf5()
     grid.create_xml(add_as_part=True)
 
     nk, nj, ni = cp_shape[0], cp_shape[1], cp_shape[2]
 
-    # 4) ACTNUM
+    # 4) ACTNUM (explicitly stored as discrete)
     if actnum_kji is not None:
         assert actnum_kji.shape == (nk, nj, ni), f"ACTNUM must be {(nk, nj, ni)}, got {actnum_kji.shape}"
         add_property(model, grid.uuid, actnum_kji.astype(np.int32), "ACTNUM")
 
-    # 5) Categorical lookup (FACIES)
+    # 5) Categorical lookup (FACIES) – provide if you need categorical properties
     facies_lookup_uuid = None
     if facies_lookup:
         sl = rqp.StringLookup(model, int_to_str_dict=facies_lookup, title="FACIES_LOOKUP")
@@ -181,7 +188,7 @@ def build_from_corner_points(
                 string_lookup_uuid=(facies_lookup_uuid if kw.upper() == "FACIES" else None),
             )
 
-    # 7) Store EPC at end
+    # 7) Finalize EPC
     model.store_epc()
     return model
 
@@ -207,7 +214,6 @@ def build_from_grdecl(grdecl_path: str, epc_path: str, *, epsg_code: Optional[st
     if hasattr(grid, "properties"):
         for p in grid.properties:
             name = p.name.upper()
-            # take a conservative set; extend mapping as needed
             if name in ECL_TO_RESQML or name == "FACIES":
                 arr = np.asarray(p.values).reshape(nk, nj, ni)
                 props[name] = arr
@@ -222,71 +228,105 @@ def build_from_grdecl(grdecl_path: str, epc_path: str, *, epsg_code: Optional[st
     )
 
 
-# ---------------- In-memory tiny demo grid ----------------
-def build_in_memory(*args, **kwargs) -> rq.Model:
-    """
-    Create a tiny synthetic 3D corner-point grid (2x2x2) entirely in memory,
-    attach a few demo properties, and optionally persist to EPC if `epc_path` is provided.
-
-    Parameters (all optional, taken from kwargs):
-      epc_path: str or None (if provided, the model is written to disk)
-      dx, dy, dz: float cell sizes (default: 100.0, 100.0, 10.0)
-
-    Returns:
-      resqpy.model.Model
-    """
-    epc_path = kwargs.get("epc_path", None)
-    dx = float(kwargs.get("dx", 100.0))
-    dy = float(kwargs.get("dy", 100.0))
-    dz = float(kwargs.get("dz", 10.0))
-
-    nk, nj, ni = 2, 2, 2
-
-    # Build simple vertical pillars & orthogonal cells
-    # Corner-points array: (nk, nj, ni, 2, 2, 2, 3) in [k,j,i] ordering
-    x = np.array([0.0, dx, 2 * dx])
-    y = np.array([0.0, dy, 2 * dy])
-    z_top = 0.0
-    z_bot = dz * nk
+# ---------------- In-memory builder (used by ecletp.main) ----------------
+def _make_synthetic_cp(nk=2, nj=2, ni=2, dx=100.0, dy=100.0, dz=10.0) -> np.ndarray:
+    """Produce a simple orthogonal 7D corner-points array."""
+    x = np.linspace(0.0, dx * ni, ni + 1)
+    y = np.linspace(0.0, dy * nj, nj + 1)
+    z0 = 0.0
 
     cp = np.zeros((nk, nj, ni, 2, 2, 2, 3), dtype=float)
     for k in range(nk):
         for j in range(nj):
             for i in range(ni):
-                # eight corners: (k-face 0/1, j-face 0/1, i-face 0/1)
-                # z increases downwards (depth) – CRS will set z_inc_down=True
-                cell_z_top = z_top + k * dz
-                cell_z_bot = z_top + (k + 1) * dz
-                # corners in local [i0,i1] x [j0,j1]
+                zt, zb = z0 + k * dz, z0 + (k + 1) * dz
                 i0, i1 = i, i + 1
                 j0, j1 = j, j + 1
+                cp[k, j, i, 0, 0, 0] = (x[i0], y[j0], zt)
+                cp[k, j, i, 0, 0, 1] = (x[i1], y[j0], zt)
+                cp[k, j, i, 0, 1, 0] = (x[i0], y[j1], zt)
+                cp[k, j, i, 0, 1, 1] = (x[i1], y[j1], zt)
+                cp[k, j, i, 1, 0, 0] = (x[i0], y[j0], zb)
+                cp[k, j, i, 1, 0, 1] = (x[i1], y[j0], zb)
+                cp[k, j, i, 1, 1, 0] = (x[i0], y[j1], zb)
+                cp[k, j, i, 1, 1, 1] = (x[i1], y[j1], zb)
+    return cp
 
-                # Lower face (k=0) & Upper face (k=1) (RESQML uses [k,j,i] axis for cp blocks)
-                cp[k, j, i, 0, 0, 0] = (x[i0], y[j0], cell_z_top)  # k0, j0, i0
-                cp[k, j, i, 0, 0, 1] = (x[i1], y[j0], cell_z_top)  # k0, j0, i1
-                cp[k, j, i, 0, 1, 0] = (x[i0], y[j1], cell_z_top)  # k0, j1, i0
-                cp[k, j, i, 0, 1, 1] = (x[i1], y[j1], cell_z_top)  # k0, j1, i1
 
-                cp[k, j, i, 1, 0, 0] = (x[i0], y[j0], cell_z_bot)  # k1, j0, i0
-                cp[k, j, i, 1, 0, 1] = (x[i1], y[j0], cell_z_bot)  # k1, j0, i1
-                cp[k, j, i, 1, 1, 0] = (x[i0], y[j1], cell_z_bot)  # k1, j1, i0
-                cp[k, j, i, 1, 1, 1] = (x[i1], y[j1], cell_z_bot)  # k1, j1, i1
+def build_in_memory(source_grid: Optional[Any] = None,
+                    *,
+                    epc_path: str = "in_memory.epc",
+                    title_prefix: str = "In-Memory",
+                    dataspace: Optional[str] = None) -> rq.Model:
+    """
+    Build a RESQML model entirely in memory.
 
-    # Demo properties (shape (nk, nj, ni) in [k, j, i] order)
+    Parameters
+    ----------
+    source_grid : optional
+        Parsed grid from ecletp.grdecl_reader (dict-like). Expected keys if provided:
+          - 'cp' or 'corner_points': (nk,nj,ni,2,2,2,3) float64
+          - 'actnum' (optional): (nk,nj,ni) int/bool
+          - 'properties' (optional): dict[str, (nk,nj,ni)]
+          - 'epsg', 'xy_units', 'z_units', 'z_inc_down' (optional metadata)
+    epc_path : str
+        Output EPC path.
+    title_prefix : str
+        Title prefix used for the grid/metadata (not a kwarg to grid_from_cp).
+    dataspace : str | None
+        Passed through (not used here, but accepted for CLI compatibility).
+
+    Returns
+    -------
+    resqpy.model.Model
+    """
+
+    # If a grid object was provided (from your reader), use it; else make a tiny demo.
+    if source_grid is not None:
+        # Accept dict-like inputs
+        get = (source_grid.get if isinstance(source_grid, dict) else lambda k, d=None: getattr(source_grid, k, d))
+
+        cp = get("cp", None) or get("corner_points", None)
+        if cp is None:
+            # Fallback to demo if cp missing
+            cp = _make_synthetic_cp(nk=3, nj=2, ni=2, dx=100.0, dy=100.0, dz=10.0)
+
+        act = get("actnum", None)
+        props = get("properties", None) or {}
+
+        epsg = get("epsg", None)
+        xy_units = get("xy_units", "m")
+        z_units = get("z_units", "m")
+        z_inc_down = bool(get("z_inc_down", True))
+
+        model = build_from_corner_points(
+            epc_path=epc_path,
+            cp_kjinxyz=np.asarray(cp),
+            actnum_kji=(np.asarray(act) if act is not None else None),
+            properties={k.upper(): np.asarray(v) for k, v in props.items()},
+            epsg_code=epsg,
+            title=f"{title_prefix} Grid",
+            xy_units=xy_units,
+            z_units=z_units,
+            z_inc_down=z_inc_down,
+        )
+        return model
+
+    # No source grid: produce a small synthetic example (2x2x2)
+    nk, nj, ni = 2, 2, 2
+    cp = _make_synthetic_cp(nk=nk, nj=nj, ni=ni, dx=100.0, dy=100.0, dz=10.0)
     poro = np.full((nk, nj, ni), 0.25, dtype=float)
     ntg = np.ones((nk, nj, ni), dtype=float)
     permz = np.full((nk, nj, ni), 100.0, dtype=float)  # mD
     actnum = np.ones((nk, nj, ni), dtype=np.int32)
 
-    # Build the model (persist if epc_path is supplied)
-    epc = epc_path or "in_memory.epc"
     model = build_from_corner_points(
-        epc_path=epc,
+        epc_path=epc_path,
         cp_kjinxyz=cp,
         actnum_kji=actnum,
         properties={"PORO": poro, "NTG": ntg, "PERMZ": permz},
         epsg_code=None,
-        title="In-Memory Demo Grid",
+        title=f"{title_prefix} Demo Grid",
     )
     return model
 
@@ -301,7 +341,9 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if args.grdecl:
-        build_from_grdecl(args.grdecl, args.epc or "grid.epc", epsg_code=args.epsg)
+        if not args.epc:
+            args.epc = os.path.splitext(os.path.basename(args.grdecl))[0] + ".epc"
+        build_from_grdecl(args.grdecl, args.epc, epsg_code=args.epsg)
     elif args.epc:
         # run synthetic in-memory build to the given EPC
         build_in_memory(epc_path=args.epc)
