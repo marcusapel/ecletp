@@ -30,29 +30,30 @@ def uuid5(name: str) -> _uuid.UUID:
 
 def build_in_memory(grid: GrdeclGrid, title_prefix: str, dataspace: str = "maap/m25test") -> InMemoryResqml:
     """Build CRS, IJK grid and properties using resqpy with an in-memory HDF5 backend.
-
     Returns an InMemoryResqml bundle with xml and numpy arrays and URI suggestions for ETP PutDataArrays.
     """
     import h5py
     import lxml.etree as ET
-    import resqpy.model as rqm
+    import resqpy.model as rq
     import resqpy.crs as rqc
     import resqpy.grid as rqq
     import resqpy.property as rqp
 
-def build_in_memory(grid, title_prefix='model', dataspace=''):
     # Create a new in-memory model
-    model = rqm.Model(new_epc_file='inmem.epc')
+    model = rq.new_model('inmem.epc')
 
     # Define default CRS using EPSG:2334
     crs = rqc.Crs(
-        model=model,
+        parent_model=model,
         title='EPSG:2334 CRS',
-        origin=(0.0, 0.0, 0.0),
+        x_offset=0.0,
+        y_offset=0.0,
+        z_offset=0.0,
         rotation=0.0,
+        xy_units='m',
+        z_units='m',
         z_inc_down=True,
-        units='m',
-        epsg_code=2334
+        epsg_code='2334' 
     )
     crs.create_xml()
 
@@ -64,7 +65,7 @@ def build_in_memory(grid, title_prefix='model', dataspace=''):
             origin=(0.0, 0.0, 0.0 if grid.tops is None else float(grid.tops.min())),
             extent_kji=(grid.nk, grid.nj, grid.ni),
             dxyz=(float(grid.dx.mean()), float(grid.dy.mean()), float(grid.dz.mean())),
-            crs_uuid=crs_uuid,
+            crs_uuid=crs.uuid,
             set_points_cached=False,
             title=f"{title_prefix} IJK Grid",
             uuid=grid_uuid
@@ -79,7 +80,7 @@ def build_in_memory(grid, title_prefix='model', dataspace=''):
             ni=grid.ni, nj=grid.nj, nk=grid.nk,
             zcorn=grid.zcorn.reshape((-1,)),  # resqpy expects shaped arrays; from GRDECL layout
             coord=grid.coord.reshape((-1,)),
-            crs_uuid=crs_uuid,
+            crs_uuid=crs.uuid,
             title=f"{title_prefix} IJK Grid",
             uuid=grid_uuid
         )
@@ -122,4 +123,4 @@ def build_in_memory(grid, title_prefix='model', dataspace=''):
         xml_bytes = ET.tostring(root, pretty_print=True, xml_declaration=True, encoding='UTF-8')
         xml_by_uuid[u] = xml_bytes
 
-    return InMemoryResqml(model=model, crs_uuid=crs_uuid, grid_uuid=grid_uuid, property_uuids=property_uuids, xml_by_uuid=xml_by_uuid, array_uris=array_uris)
+    return InMemoryResqml(model=model, crs_uuid=crs.uuid, grid_uuid=grid_uuid, property_uuids=property_uuids, xml_by_uuid=xml_by_uuid, array_uris=array_uris)
