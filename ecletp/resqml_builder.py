@@ -35,21 +35,14 @@ def build_in_memory(grid: GrdeclGrid, title_prefix: str, dataspace: str = "maap/
     """
     import h5py
     import lxml.etree as ET
-    import resqpy.model as rq
+    import resqpy.model as rqm
     import resqpy.crs as rqc
     import resqpy.grid as rqq
     import resqpy.property as rqp
 
-    # Create a model with in-memory h5 file
-    mem_h5 = h5py.File('inmem.h5', mode='w', driver='core', backing_store=False)
-    model = rq.Model(new_epc=True, epc_file='inmem.epc')
-    model.h5_file = mem_h5  # type: ignore
-
-import resqpy.crs as rqc
-
 def build_in_memory(grid, title_prefix='model', dataspace=''):
     # Create a new in-memory model
-    model = rq.Model(new_epc_file='inmem.epc')
+    model = rqm.Model(new_epc_file='inmem.epc')
 
     # Define default CRS using EPSG:2334
     crs = rqc.Crs(
