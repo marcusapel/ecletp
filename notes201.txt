@@ -1,0 +1,205 @@
+Create a python 3.12 script "ecl2etp.py":
+
+reuse the config_etp.py module 
+
+Required functionality can be subdivided into three components: 
+1. use cli filepath --eclgrd to read and parse one Eclipse GRDECL file (grid definition, metadata, and geometry array,  
+   (for both cartesian and corner-point option grid option), and all inline or colocated grid cell properties like PORO, PERMX, SWAT 
+    Add a GRDECL parser (grid geometry def in addition):
+    * DIMENS / DX / DY / DZ / TOPS (Cartesian block), and  PORO / PERMX / PRESSURE / SWAT / SOIL / ACTNUM (cell properties) to create 
+RESQML 2.0.1 objects in memory using resqpy.
+   USe a mapping of Eclipse to published OSDU types like: 'PORO':  {"osdu_ref":"osdu:reference-data--PropertyNameType:Porosity:1.0.0", "osdu_name":"Porosity", "display":"Porosity", "uom":"frac"},)
+    If no grdecl file is given, then fallback to a very small 2x2x3 cell demo grid and few constant cell properties.
+ rely on existing resqpy as much as possible and use resdata python lib for eclise file parsing. In essence, a resdata to resqpy mapping. 
+
+2. From the object definitions and arrays create Energistics RESQML 2.0.1 IjkGridRepresentation, Crs (eml 2.0), and Properties likle ContinuosProperty from PORO etc.. as XML objects.
+   reuse https://github.com/bp/resqpy/tree/master/resqpy for RESQML 2.0.1 grid objects and check the doc for kwargs, constructors etc https://resqpy.readthedocs.io/en/latest/. But do not write XML and HDF files - we will just store all RESQMl efficiently in memory.
+    - Use uuid5 for the generated XML objects and ensure compliance with resqml 2.0.1 and referencing of IjkGridRepresentation to properties, crs etc
+    - resuse resqpy for crs, dor publisher etc if suitable etc.
+    - IjkGridRepresentationGrid and property arrays must mainatin correct uuid‑path references
+    
+3. These xml objects must be published to an ETP 1.2 RDDMS store using protocol 3 PutDataObjects. 
+use pyetp lib and consider these for use: 
+(from pyetp.client import connect, from pyetp.config import SETTINGS as ETP_SETTING, 
+from etptypes.energistics.etp.v12.datatypes.object.data_object import DataObject  
+from etptypes.energistics.etp.v12.datatypes.object.resource import Resource  
+    from etptypes.energistics.etp.v12.datatypes.object.data_object import DataObjectFormat as _DOF  
+    from etptypes.energistics.etp.v12.protocol.store.put_data_objects import put_data_objects
+    from etptypes.energistics.etp.v12.protocol.data_array.put_data_arrays import PutDataArrays)
+
+  If the byte size  is > 1024 then use etp Protocol 9 DataArray for array transfer, namely the grid geometry and properties,
+    and gzip binary chunks >4MiB
+  - Use uuid5 and 'uuid-path' for ETP array path style.
+   Use content types following Energistics conventions:  application/x-resqml+xml;version=2.0;type=resqml20.IjkGridRepresentation
+       application/x-eml+xml;version=2.0;type=eml20.LocalDepth3dCrs   
+ - for etp connection and overall config use the attached confid_etp.py, the "eml:///dataspace('maap/m25test')"  is correct!
+- logging  that lists the ETP URIs the script will put (objects and arrays), connection header and call but not the TOKEN
+- you need to reimplement transaction protocol 18 to connect first and store the transaction id , check examples for use.
+  If a transaction already exists the fetcgh the transaction id and use it. Otherwise open a new transaction, then close it after commiting all objects (crs ijkgrid and properties)
+
+create a clean overall design and structure, code comments, and debug logging with cli --log 
+
+References
+----------
+- GRDECL -> RESQML mapping guidance (Energistics docs):
+  here is the mapping to resqml https://docs.energistics.org/RESQML/RESQML_TOPICS/RESQML-000-292-0-C-sv2010.html
+  and here is an example parser https://raw.githubusercontent.com/equinor/resdata/refs/heads/main/python/resdata/grid/rd_grid.py
+  (maybe also https://raw.githubusercontent.com/BinWang0213/PyGRDECL/refs/heads/master/GRDECL_Parser.py)
+  and example grid https://raw.githubusercontent.com/BinWang0213/PyGRDECL/refs/heads/master/ExampleData/SPE10B.GRDECL
+  https://github.com/geosiris-technologies/energyml-python
+- ResData (Equinor) and PyGRDECL parsers used as references for behavior & keywords:
+  https://github.com/equinor/resdata
+  https://github.com/BinWang0213/PyGRDECL/blob/master/GRDECL_Parser.py
+
+-  use also check the examples for inspiration and kwargs, but prefer original github etc source libs and docs and examples 
+   for learning (we need to use correct RESQML 2.0.1 and resqpy for correct grid generation) ecl_grid_etp.py ecl_resqml20_etp.bak.py
+
+*****************************************************************************************************************************************
+
+- GEOSIRIS energyml-python repository / modules: commonv2.py resqmlv2.py
+  with these definitions which are equivalent to the imported energyml.resqml.v2_2 and energyml.eml.v2_3: 
+  https://raw.githubusercontent.com/geosiris-technologies/energyml-python/refs/heads/main/energyml-resqml2-2/src/energyml/resqml/v2_2/resqmlv2.py 
+  and https://raw.githubusercontent.com/geosiris-technologies/energyml-python/refs/heads/main/energyml-common2-3/src/energyml/eml/v2_3/commonv2.py 
+  This is a reference example to usage: https://github.com/geosiris-technologies/energyml-python/blob/main/energyml-utils/example/main.py 
+
+- use this to check unknown constructors/kwargs: ecl_grid_etp.bak6.docs.py
+ - do not invent kwargs or constructors for existing classes but ask me to inspect ambiguities for you first
+CLI
+---
+    use these clis args: python ecl_grid_etp.py [--grdeclfile PATH] [--props [files or names?]] 
+
+
+
+
+******************************************************************************************************************
+
+for ecl_grid_etp-refactor.py:
+
+
+    You’re almost there. The server’s reply
+
+ETPError: Expected XML format (code=14)
+means your ETP PutDataObjects arrived with the format flag set to JSON, while the server expected XML (it decides from your contentType—which has +xml—that the payload must be XML, so it checks the DataObject.format field in the ETP message and rejects if it isn’t Xml). XML is still the “reference” serialization for EnergyML over ETP, so many servers enforce this strictly. 12
+
+In your pyetp build, the generated etptypes data class names the field as format_ (trailing underscore) to avoid the Python keyword clash. If that field isn’t explicitly set to the DataObjectFormat.Xml enum, the server will treat the message as JSON and fail with exactly the error you’re seeing. (You already saw earlier that DataObject didn’t have .format on your build—same root cause.) The fix is to force the enum to Xml regardless of which name (format or format_) your dataclass uses. 3
+
+Quick patch
+Replace your to_data_object(...) helper with the version below (or add the “enforce XML” block after constructing the object). The important part is the post‑construction enforcement of .format and .format_:
+
+
+Why the contentType string changed?
+Using the generic Energistics media type application/x-energistics+xml with type= and version= parameters is what the Energistics examples/docs show in practice; it avoids server-side heuristics tied to vendor subtypes and makes the intent (“this is EnergyML XML for {qualified type}”) unambiguous. Your server will still accept the old application/x-resqml+xml variant, but aligning to the general form removes one more variable when debugging format mismatches. 24
+
+Tip: If you keep your original helper, at send time you can still enforce XML before publishing:
+
+
+This is a belt‑and‑braces guard against code paths where the constructor didn’t apply.
+
+Validate locally before publishing
+Dry-run and inspect the log: add a debug print that shows the effective enum:
+
+You want to see Xml here for every object.
+
+Confirm the contentType contains +xml and the type= parameter matches your qualified type (e.g., resqml22.IjkGridRepresentation). This is the other signal servers use to demand XML. 2
+Why this happens (context)
+ETP carries each EnergyML object in a DataObject { resource, data, format }. If resource.contentType declares XML, the format must be Xml and the data must indeed be XML bytes. Servers will reject “format: Json” with an “Expected XML format” error. (The reverse is true for JSON.) 21
+Many Python bindings generate dataclass fields named format_, so writing to format has no effect. That’s why dry-run previously failed at d.format, and why the server still saw JSON—your code wasn’t actually setting the field the message exporter uses. 3
+Next steps for you
+Patch to_data_object with the snippet above (or enforce after creation).
+Re-run:
+
+If anything still complains, paste me the first PutDataObjects failure from the server, plus your logged DataObject.format line—we’ll check if any object slipped through without being set to Xml.
+If you’d like, I can regenerate the full minimal script for you with this change baked in (keeping your minimal CLI and the pyetp SETTINGS usage you confirmed earlier). Also happy to add a --probe mode that only requests a session and sends a single tiny EML object—useful for quick XML/JSON sanity checks without pushing a whole grid.
+
+References
+• ETP v1.2 spec (messages & serialization behavior; XML is the normative form) 2
+• Energistics note on JSON: XML remains the format of reference for Energistics standards (context for why servers default to expecting XML) 1
+• ETP DevKit resources (typical contentType usage and dev guidance) 4
+
+
+*****************************************************************************************
+ecl_grid_etp.py has the correct strategy, but the xml files generated are wrong and ijkgrid is missing. 
+Adapt the grdecl to resqml 2.2 conversion code from grd2xml.py which is more correct, but unproven. Use thes references too:
+- GRDECL -> RESQML mapping guidance (Energistics docs):
+  here is the mapping to resqml (version 2.0.1, but we require 2.2, so verify changes) https://docs.energistics.org/RESQML/RESQML_TOPICS/RESQML-000-292-0-C-sv2010.html
+  and here is an example parser https://raw.githubusercontent.com/equinor/resdata/refs/heads/main/python/resdata/grid/rd_grid.py
+  (maybe also https://raw.githubusercontent.com/BinWang0213/PyGRDECL/refs/heads/master/GRDECL_Parser.py)
+  and example grid https://raw.githubusercontent.com/BinWang0213/PyGRDECL/refs/heads/master/ExampleData/SPE10B.GRDECL
+  https://github.com/geosiris-technologies/energyml-python
+and the main validiadtion and compliance reference: RESQMLv2.2 Tech Ref DRAFT.docx
+
+
+*****************************************************************************************************
+
+TRANSACTION
+
+
+Why you’re seeing Failed to get transaction … (code=15)
+On ADME (Azure Data Manager for Energy), RDDMS requires each WebSocket session to be scoped to a data partition and (for RDDMS) to a dataspace. If those aren’t set correctly in the ETP handshake, the server can’t associate your PutDataObjects with a valid transaction for maap/m25test, and you’ll get a server-side ETP error like the one you’re seeing. Two frequent causes:
+
+Dataspace scoping is wrong
+Your script defaults DATASPACE from "eml:///dataspace('maap/m25test')" and then tries to strip it to the name with a regex. If that regex misses, you’ll send the URI instead of the name, and the server won’t recognize the dataspace context. ADME examples always pass the name (e.g., -s maap/m25test). 1
+
+Missing/incorrect data-partition-id
+ADME requires the request header data-partition-id for legal/entitlement resolution and write paths. Their docs and samples pass it explicitly (--data-partition-id <partition>). If your client doesn’t send that header (or sends the wrong value), the server can’t open a transaction in the right partition. 1
+
+You already created the dataspace with ACL and legal tag. That’s correct for creation. ADME docs show dataspace creation via websocket with --xdata containing viewers, owners, legaltags, and otherRelevantDataCountries. Once the dataspace exists, writes do not need to resend those fields; you just need to scope the session. 1
+
+Also, ensure the legal tag you used exists and is valid in your partition; ADME legal tag management is partition-scoped (service even auto-appends data-partition-id when you create a tag via REST). 2
+
+Minimal changes to your script
+1) Always pass the dataspace name (not the URI) to the handshake
+Fix the _ds_name helper to a simple, reliable parser and ensure we export the name into the DATASPACE environment variable before pyetp import/connection.
+
+
+2) Ensure ADME sees the data partition header
+Your Config.from_env already reads DATA_PARTITION_ID (fallback to DATA_PARTITION). In the handshake, pyetp reads environment variables when imported; your _prepare_pyetp_env sets DATA_PARTITION and DATASPACE. Make it also set DATA_PARTITION_ID to keep both forms in sync (some builds look for one or the other).
+
+
+ADME examples consistently pass --data-partition-id <partition> when using the Reservoir DDMS websocket (ETP) endpoints. Mirroring that in the handshake ensures the server resolves entitlements/legal metadata correctly. 1
+
+3) (Optional but robust) Start/Commit an explicit transaction
+Many ETP servers auto-open a transaction for a PutDataObjects, but ADME’s RDDMS behaves more predictably when the client explicitly opens one. If your pyetp build exposes the Store protocol messages, you can send StartTransaction / CommitTransaction around your publish:
+
+
+If your etptypes build doesn’t include StartTransaction/CommitTransaction, the patch safely no-ops and you’ll continue with the auto-transaction path.
+
+Environment & run checklist
+Use the ADME RDDMS endpoint (WSS):
+
+(The ADME tutorials and samples use exactly this path.) 1
+
+Set the partition and dataspace name:
+
+(ADME’s websocket examples always use the name with -s, not the eml:// URI.) 1
+
+Pass a valid bearer token with entitlements on the owners/viewers you used:
+
+Verify the dataspace exists and is visible to your principal: You can list spaces using the open source ETP client shown in ADME docs:
+
+(If it doesn’t show maap/m25test, create it with --new and the --xdata block that contains your ACL and legal tags.) 1
+
+Ensure the legal tag exists (and hasn’t expired) in the same partition: ADME legal tags are partition-scoped and required at ingest time; their Learn page shows how to create and validate them. 2
+What this changes in practice
+Your ETP session will handshake with:
+ETP_URL = wss://…/api/reservoir-ddms-etp/v2/
+DATA_PARTITION_ID = data (also mirrored to DATA_PARTITION)
+DATASPACE = maap/m25test (the name)
+Optional: a Store.StartTransaction followed by PutDataObjects and a Store.CommitTransaction makes transaction handling explicit on ADME RDDMS.
+With those in place, the server should stop complaining about “Failed to get transaction…”. The “creation-time” metadata (viewers, owners, legaltags, otherRelevantDataCountries) remains associated with the dataspace record you created; you do not need to send it again per write. 1
+
+Quick sanity test (no network calls)
+Before reconnecting to ADME, print what your script will actually handshake with:
+
+
+Then run your script as usual:
+
+
+If you still hit an error, please copy the --- ETP ERROR DETAILS --- block your script prints (you already added good diagnostics in _log_etp_errors) and I’ll tailor the next tweak. In particular, if the server returns an entitlement/ACL failure, we’ll verify that the owners group includes your principal/service principal and that your token targets the ADME resource correctly. 12
+
+References
+ADME Reservoir DDMS websocket tutorial (examples for creating/listing dataspaces, and always passing --data-partition-id; note the --xdata block when creating a dataspace) 1
+ADME Legal tags (how tags are created/validated and that the service auto-appends the partition id) 2
+(Background) OSDU discussions show that in newer releases, dataspace access and lifecycle operations depend on ACL + legal tag metadata associated with the dataspace record. 3
+One last thing, Marcus
+I noticed from past work you prefer local EnergyML bindings (e.g., commonv2.py / resqmlv2.py) over mixed/Geosiris imports. If you want, I can refactor the RESQML/EML payload construction to use your local bindings path and keep the ETP wrapping unchanged. Want me to do that next?

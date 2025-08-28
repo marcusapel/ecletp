@@ -1,0 +1,7 @@
+
+resqpy>=5.1
+resdata>=5.0 ; platform_system != "Windows"
+pyetp>=0.0.35
+lxml>=4.9
+h5py>=3.10
+numpy>=1.23
