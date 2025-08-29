@@ -6,8 +6,6 @@ from urllib import request, parse
 from dataclasses import dataclass
 from typing import Optional
 
-STATIC_REFRESH_TOKEN = os.environ['refresh_token']
-
 @dataclass
 class Config:
     rddms_host: str
@@ -39,7 +37,7 @@ def get_token() -> str:
         "grant_type": "refresh_token",
         "client_id": "ebd2bfee-ecba-47b7-a33c-017d0131879d",
         "scope": "7daee810-3f78-40c4-84c2-7a199428de18/.default openid offline_access",
-        "refresh_token": STATIC_REFRESH_TOKEN  
+        "refresh_token": os.environ['refresh_token']  
     }
     try:
         payload = json.loads(
