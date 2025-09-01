@@ -1,0 +1,21 @@
+{
+    "workbench.colorTheme": "GitHub Dark",
+    "python.defaultInterpreterPath": "c:\\Users\\MAAP\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+    "[python]": {
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.defaultColorDecorators": "never",
+        "editor.formatOnType": true,
+        "editor.wordBasedSuggestions": "off"
+    },
+    "python.venvPath": "~/.venv",
+    "python.venvFolders": [
+        "",
+        "~/.venv"
+    ],
+    "python.useEnvironmentsExtension": true,
+    "python.locator": "js",
+    "python.autoComplete.extraPaths": [],
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.diagnosticSeverityOverrides": {
+    }
+}
