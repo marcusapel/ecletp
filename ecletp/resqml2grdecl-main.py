@@ -322,6 +322,7 @@ def main():
     uuids = _parse_uuid_list(args.grid)
 
     process_all(cfg, args.out, uuids, export_egrid=args.egrid, local_xy_mode=bool(args.local_xy))
-
+    os._exit(0)
+    
 if __name__ == "__main__":
     sys.exit(main())
