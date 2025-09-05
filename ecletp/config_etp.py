@@ -1,11 +1,8 @@
-# config_etp.py
-
 import os
 import json
 from urllib import request, parse
 from dataclasses import dataclass
 from typing import Optional
-
 @dataclass
 class Config:
     rddms_host: str
@@ -18,7 +15,6 @@ class Config:
     use_protocol9: bool = True
     object_format: str = 'XML'
     epsg: int = 2334  # Default EPSG code
-
     @classmethod
     def from_env(cls) -> 'Config':
         return cls(
@@ -37,7 +33,7 @@ def get_token() -> str:
         "grant_type": "refresh_token",
         "client_id": "ebd2bfee-ecba-47b7-a33c-017d0131879d",
         "scope": "7daee810-3f78-40c4-84c2-7a199428de18/.default openid offline_access",
-        "refresh_token": os.environ['refresh_token']  
+        "refresh_token": os.environ['refresh_token']
     }
     try:
         payload = json.loads(
@@ -52,5 +48,3 @@ def get_token() -> str:
         return token
     except Exception as e:
         raise RuntimeError(f"Token request failed: {e}")
-
-
