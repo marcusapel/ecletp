@@ -7,15 +7,15 @@ Full stratigraphic model conversion utilities:
 - RESQML 2.0.1 I/O (with optional v2.2-style over/underburden endcaps)  <-> Domain model
 - OSDU WPC StratigraphicColumnRankInterpretation (+ optional ChronoStrat reference-data) <-> Domain model
 - OpenWorks (SMDA Excel / JSON) <-> Domain model
-- Minimal RESQML obj_StratigraphicOccurrenceInterpretation XML writer (RESQML 2.0.1-compliant)
+- RESQML obj_StratigraphicOccurrenceInterpretation XML writer (RESQML 2.0.1-compliant)
 
-CLI Commands (renamed as requested):
+CLI Commands:
   * resqml2osdu    : Convert a RESQML EPC to an OSDU manifest
   * osdu2resqml    : Convert an OSDU manifest to a RESQML EPC
   * ow2resqml      : Convert OpenWorks (Excel/JSON) to a RESQML EPC
   * ow2osdu        : Convert OpenWorks (Excel/JSON) to an OSDU manifest
 Extras:
-  * make-occurrence: Create a minimal RESQML obj_StratigraphicOccurrenceInterpretation XML
+  * make-occurrence: Create a RESQML obj_StratigraphicOccurrenceInterpretation XML
 
 Dependencies:
   - pandas  (optional; required only for --excel inputs)
