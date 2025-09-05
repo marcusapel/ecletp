@@ -34,7 +34,7 @@ import fetpapi
 import fesapi
 
 # Local converter
-from resqml_to_grdecl import (
+from resqml2grdecl import (
     xtgeo_grid_from_fesapi_grid,
     write_grdecl_geometry,
     write_property_grdecl,
